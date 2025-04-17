@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Tickets</title>
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- FontAwesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <!-- SweetAlert2 -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- jsPDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-light">
+  <div class="container py-4" id="app">
+    <div id="loginSection" class="text-center">
+      <h2>Iniciar Sesión</h2>
+      <input type="email" id="email" class="form-control my-2" placeholder="Email">
+      <input type="password" id="password" class="form-control my-2" placeholder="Contraseña">
+      <button class="btn btn-primary" onclick="login()">Iniciar Sesión</button>
+      <button class="btn btn-link" onclick="register()">Registrarse</button>
+      <button class="btn btn-link" onclick="recoverPassword()">¿Olvidaste tu contraseña?</button>
+    </div>
+
+    <div id="dashboardSection" style="display:none;">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3>Bienvenido, <span id="userEmail"></span></h3>
+        <button class="btn btn-danger" onclick="logout()">Cerrar sesión</button>
+      </div>
+      <div class="mb-3">
+        <button class="btn btn-success" onclick="showTicketForm()">Crear Ticket</button>
+        <button class="btn btn-secondary" onclick="exportToCSV()">Exportar CSV</button>
+      </div>
+      <canvas id="priorityChart" height="100"></canvas>
+      <div id="ticketForm" class="my-4" style="display:none">
+        <h4>Nuevo Ticket</h4>
+        <input type="text" id="titulo" class="form-control my-2" placeholder="Título">
+        <textarea id="descripcion" class="form-control my-2" placeholder="Descripción"></textarea>
+        <select id="prioridad" class="form-select my-2">
+          <option value="alta">Alta</option>
+          <option value="media">Media</option>
+          <option value="baja">Baja</option>
+        </select>
+        <input type="text" id="tipo" class="form-control my-2" placeholder="Tipo de Pedido">
+        <button class="btn btn-primary" onclick="crearTicket()">Guardar Ticket</button>
+      </div>
+      <div id="ticketList" class="row mt-4"></div>
+    </div>
+  </div>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyASahHP46NfRGD-JxvcXMdxBbY15cOzWN4",
+    authDomain: "plataformatikets2.firebaseapp.com",
+    projectId: "plataformatikets2",
+    storageBucket: "plataformatikets2.firebasestorage.app",
+    messagingSenderId: "927256993957",
+    appId: "1:927256993957:web:2c5f16ac8ce1250838ad4c"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  auth.onAuthStateChanged(user => {
+    if (user) {
+      document.getElementById('loginSection').style.display = 'none';
+      document.getElementById('dashboardSection').style.display = 'block';
+      document.getElementById('userEmail').textContent = user.email;
+      cargarTickets();
+    } else {
+      document.getElementById('loginSection').style.display = 'block';
+      document.getElementById('dashboardSection').style.display = 'none';
+    }
+  });
+
+  function login() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    auth.signInWithEmailAndPassword(email, password).catch(err => Swal.fire('Error', err.message, 'error'));
+  }
+
+  function register() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    auth.createUserWithEmailAndPassword(email, password).catch(err => Swal.fire('Error', err.message, 'error'));
+  }
+
+  function recoverPassword() {
+    const email = document.getElementById('email').value;
+    auth.sendPasswordResetEmail(email).then(() => Swal.fire('Enviado', 'Revisa tu correo electrónico', 'success'));
+  }
+
+  function logout() {
+    auth.signOut();
+  }
+
+  function showTicketForm() {
+    document.getElementById('ticketForm').style.display = 'block';
+  }
+
+  function crearTicket() {
+    const titulo = document.getElementById('titulo').value;
+    const descripcion = document.getElementById('descripcion').value;
+    const prioridad = document.getElementById('prioridad').value;
+    const tipo = document.getElementById('tipo').value;
+    const fecha = new Date().toISOString();
+    const folio = 'TKT-' + Date.now();
+
+    db.collection('tickets').add({ titulo, descripcion, prioridad, tipo, fecha, folio })
+      .then(() => {
+        Swal.fire('Éxito', 'Ticket creado', 'success');
+        document.getElementById('ticketForm').reset();
+        document.getElementById('ticketForm').style.display = 'none';
+        cargarTickets();
+      })
+      .catch(err => Swal.fire('Error', err.message, 'error'));
+  }
+
+  async function cargarTickets() {
+    const snapshot = await db.collection('tickets').get();
+    const lista = document.getElementById('ticketList');
+    lista.innerHTML = '';
+    const conteo = { alta: 0, media: 0, baja: 0 };
+
+    snapshot.forEach(doc => {
+      const t = doc.data();
+      conteo[t.prioridad]++;
+      const card = document.createElement('div');
+      card.className = 'col-md-4';
+      card.innerHTML = `
+        <div class="card mb-3">
+          <div class="card-body">
+            <h5 class="card-title">${t.titulo}</h5>
+            <p>${t.descripcion}</p>
+            <p><strong>Prioridad:</strong> ${t.prioridad}</p>
+            <p><strong>Tipo:</strong> ${t.tipo}</p>
+            <p><strong>Folio:</strong> ${t.folio}</p>
+            <button class="btn btn-outline-primary" onclick='exportPDF(${JSON.stringify(t)})'>Exportar PDF</button>
+          </div>
+        </div>`;
+      lista.appendChild(card);
+    });
+
+    renderChart(conteo);
+  }
+
+  function renderChart(conteo) {
+    const ctx = document.getElementById('priorityChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['Alta', 'Media', 'Baja'],
+        datasets: [{
+          label: 'Prioridad de Tickets',
+          data: [conteo.alta, conteo.media, conteo.baja],
+          backgroundColor: ['red', 'orange', 'green']
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  }
+
+  function exportPDF(ticket) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.text(`Folio: ${ticket.folio}`, 10, 10);
+    doc.text(`Título: ${ticket.titulo}`, 10, 20);
+    doc.text(`Descripción: ${ticket.descripcion}`, 10, 30);
+    doc.text(`Prioridad: ${ticket.prioridad}`, 10, 40);
+    doc.text(`Tipo: ${ticket.tipo}`, 10, 50);
+    doc.save(`${ticket.folio}.pdf`);
+  }
+
+  function exportToCSV() {
+    db.collection('tickets').get().then(snapshot => {
+      let csv = 'Folio,Título,Descripción,Prioridad,Tipo,Fecha\n';
+      snapshot.forEach(doc => {
+        const t = doc.data();
+        csv += `${t.folio},"${t.titulo}","${t.descripcion}",${t.prioridad},${t.tipo},${t.fecha}\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'tickets.csv';
+      a.click();
+    });
+  }
+</script>
+</body>
+</html>
